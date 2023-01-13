@@ -31,6 +31,7 @@ def gen_jmp(dst, cur):
 def hook_code(uc, address, size, user_data):
     global tmp_dest
     for i in cp1.disasm(uc.mem_read(address, size), 0, size):
+        print(">>> Tracing instruction at 0x%x, instruction size = 0x%x" % (address, size))
         if i.mnemonic == "call":
             uc.reg_write(UC_X86_REG_EIP, address + size)
         elif address in start_addr and address != 1:
@@ -53,7 +54,7 @@ def main():
 
     filename = args.file
     start = int(args.addr, 16)
-    size = int(args.size , 16)
+    size = int(args.size, 16)
     f = open(filename, 'rb')
     code = f.read()[start:start + size]
     print(str(bytes(code)))
@@ -62,17 +63,24 @@ def main():
     ADDRESS = 0x0
     global tmp_dest
     flag1 = False
+    prev = None
     for i in cp.disasm(code, 0, len(code)):
-        if i.mnemonic == "popf":  # find the start of a function block
-            start_addr.append(ADDRESS + i.address)
+
+        print("[0x%x]:%s %s" % (i.address, i.mnemonic, i.op_str))
+        if i.mnemonic + " " + i.op_str == "pop rax" and prev == "popf ":  # find the start of a function block
+            start_addr.append(ADDRESS + i.address - 2)  # start from popf, 2 byte before pop rax
+            prev = i.mnemonic + " " + i.op_str
             flag1 = True
 
-        elif i.mnemonic == "pushf":
+        elif i.mnemonic + " " + i.op_str == "pushf " and prev == "push rax":
+            prev = i.mnemonic + " " + i.op_str
             end_addr.append(ADDRESS + i.address - 1)  # start from push rax, 1 byte before pushf
         elif flag1 and i.mnemonic == "jmp":
-            print(f"popf at {hex(i.address - 3)} to {i.op_str}")
             start_dest[ADDRESS + i.address - 3] = i.op_str
+            prev = i.mnemonic + " " + i.op_str
             flag1 = False
+        else:
+            prev = i.mnemonic + " " + i.op_str
     try:
         mu = Uc(UC_ARCH_X86, UC_MODE_64)
         mu.mem_map(ADDRESS, 10 * 1024 * 1024)
@@ -89,7 +97,7 @@ def main():
     except UcError as e:
         print("ERROR: %s" % e)
     print(">>> Emulation done. Start Patching")
-    with open("obf.exe", 'rb') as f:
+    with open(filename, 'rb') as f:
         orgdata = f.read()
     orgarr = bytearray(orgdata)
     for end in dest_dict:
@@ -99,9 +107,9 @@ def main():
         for i in range(0, 13):
             orgarr[start + end + i] = jmp[i]
 
-    with open(filename+"_deobf.exe", 'wb') as f:
+    with open(filename + "_deobf.exe", 'wb') as f:
         f.write(bytes(orgarr))
-        print("writing patch to:" + filename+"_deobf.exe")
+        print("writing patch to:" + filename + "_deobf.exe")
 
 
 if __name__ == "__main__":
